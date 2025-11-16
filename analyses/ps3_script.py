@@ -11,7 +11,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, SplineTransformer, StandardScaler
 
-from ps3.data import create_sample_split, load_transform
+from ps3.data import _sample_split, load_transform
 
 # %%
 # load data
@@ -23,10 +23,10 @@ weight = df["Exposure"].values
 df["PurePremium"] = df["ClaimAmountCut"] / df["Exposure"]
 y = df["PurePremium"]
 # TODO: Why do you think, we divide by exposure here to arrive at our outcome variable?
-
+# The claim amount in itself is not informative - weighting it by exposure gives us the average claim amount per unit of exposure (e.g., claim amount per year)
 
 # TODO: use your create_sample_split function here
-# df = create_sample_split(...)
+df = _sample_split.create_sample_split(df, id_column="IDpol", training_frac=0.8)
 train = np.where(df["sample"] == "train")
 test = np.where(df["sample"] == "test")
 df_train = df.iloc[train].copy()
@@ -40,7 +40,7 @@ glm_categorizer = Categorizer(columns=categoricals)
 X_train_t = glm_categorizer.fit_transform(df[predictors].iloc[train])
 X_test_t = glm_categorizer.transform(df[predictors].iloc[test])
 y_train_t, y_test_t = y.iloc[train], y.iloc[test]
-w_train_t, w_test_t = weight[train], weight[test]
+w_train_t, w_test_t = weight[train], weight[test] #weight diff obs differently (resembles weighted least squares)
 
 TweedieDist = TweedieDistribution(1.5)
 t_glm1 = GeneralizedLinearRegressor(family=TweedieDist, l1_ratio=1, fit_intercept=True)
@@ -86,15 +86,26 @@ print(
 
 # Let's put together a pipeline
 numeric_cols = ["BonusMalus", "Density"]
+numerical_steps = [('scaler', StandardScaler()), 
+                   ('spline', SplineTransformer(knots='quantile', include_bias=False))]
+numeric_transformer = Pipeline(steps=numerical_steps)
+
 preprocessor = ColumnTransformer(
     transformers=[
         # TODO: Add numeric transforms here
+        ("num", numeric_transformer, numeric_cols),
         ("cat", OneHotEncoder(sparse_output=False, drop="first"), categoricals),
     ]
 )
+
+t_glm2 = GeneralizedLinearRegressor(family=TweedieDist, l1_ratio=1, fit_intercept=True)
+
 preprocessor.set_output(transform="pandas")
 model_pipeline = Pipeline(
-    # TODO: Define pipeline steps here
+    steps=[
+        ('preprocessor', preprocessor),
+        ('estimate', t_glm2)
+    ]
 )
 
 # let's have a look at the pipeline
@@ -144,7 +155,8 @@ print(
 # 1: Define the modelling pipeline. Tip: This can simply be a LGBMRegressor based on X_train_t from before.
 # 2. Make sure we are choosing the correct objective for our estimator.
 
-model_pipeline.fit(X_train_t, y_train_t, estimate__sample_weight=w_train_t)
+model_pipeline = LGBMRegressor(objective="tweedie", tweedie_variance_power=1.5, random_state=99)
+model_pipeline.fit(X_train_t, y_train_t, sample_weight=w_train_t)
 df_test["pp_t_lgbm"] = model_pipeline.predict(X_test_t)
 df_train["pp_t_lgbm"] = model_pipeline.predict(X_train_t)
 print(
@@ -170,10 +182,18 @@ print(
 # Note: Typically we tune many more parameters and larger grids,
 # but to save compute time here, we focus on getting the learning rate
 # and the number of estimators somewhat aligned -> tune learning_rate and n_estimators
-cv = GridSearchCV(
+lgb = LGBMRegressor(objective='tweedie')
+parameter_grid = {
+    "n_estimators" : [100,200,300],
+    "learning_rate" : [0.01, 0.02, 0.05, 0.1, 0.2]
+}
 
+cv = GridSearchCV(
+    lgb,
+    parameter_grid,
+    cv=5
 )
-cv.fit(X_train_t, y_train_t, estimate__sample_weight=w_train_t)
+cv.fit(X_train_t, y_train_t, sample_weight=w_train_t)
 
 df_test["pp_t_lgbm"] = cv.best_estimator_.predict(X_test_t)
 df_train["pp_t_lgbm"] = cv.best_estimator_.predict(X_train_t)
