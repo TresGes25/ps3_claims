@@ -2,3 +2,5 @@
 __pycache__/
 *.egg-info/
 *.csv
+*.ipynb_checkpoints/
+*.DS_Store
