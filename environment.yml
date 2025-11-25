@@ -25,3 +25,5 @@ dependencies:
   - scikit-learn
   - scikit-learn types-requests
   - scikit-learn-stubs
+  - lightgbm
+  - kaggle

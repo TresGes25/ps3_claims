@@ -12,11 +12,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, SplineTransformer, StandardScaler
 from lightgbm import LGBMRegressor
 
-from ps3.data import _sample_split, load_transform
+from ps3.data import _sample_split, _load_transform
 
 # %%
 # load data
-df = load_transform()
+df = _load_transform.load_transform()
 
 # %%
 # Train benchmark tweedie model. This is entirely based on the glum tutorial.
@@ -272,15 +272,6 @@ plt.plot()
 
 # %%
 # PS4 start
-ax=df.groupby('BonusMalus')['ClaimNb'].mean().plot(kind='bar')
+df.groupby('BonusMalus')['ClaimNb'].mean().plot(kind='bar')
 plt.xlabel('BonusMalus')
-for i, label in enumerate(ax.get_xticklabels()):
-    if i % 10 != 0:
-        label.set_visible(False)
 plt.ylabel('Average Claims')
-
-# %%
-constrained_lgbm = LGBMRegressor(objective="tweedie", tweedie_variance_power=1.5, random_state=99, monotone_constraints=[1 if col == 'BonusMalus' else 0 for col in X_train_t.columns])
-constrained_lgbm.fit(X_train_t, y_train_t, sample_weight=w_train_t)
-df_test["pp_t_lgbm_constrained"] = constrained_lgbm.predict(X_test_t)
-df_train["pp_t_lgbm_constrained"] = constrained_lgbm.predict(X_train_t)
