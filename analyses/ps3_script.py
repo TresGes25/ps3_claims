@@ -311,3 +311,82 @@ display(constrained_train)
 constrained_test = _evaluate_predictions.evaluate_predict(df_test["pp_t_lgbm_constrained"], df_test['PurePremium'], df_test['Exposure'], 
                                                             Tweedie_power= 1.5, model_type ='Test - Constrained Tuned LGBM')
 display(constrained_test)
+
+# %%
+# Exercise 2: Learning Curve
+
+# Re-fit the constrained lgbm with eval_set to track training progress
+constrained_lgbm_cv = LGBMRegressor(
+    objective="tweedie",
+    tweedie_variance_power=1.5,
+    random_state=99,
+    monotone_constraints=[1 if col == 'BonusMalus' else 0 for col in X_train_t.columns]
+)
+
+constrained_lgbm_cv.fit(
+    X_train_t,
+    y_train_t,
+    sample_weight=w_train_t,
+    eval_set=[(X_train_t, y_train_t), (X_test_t, y_test_t)],
+    eval_names=['train', 'test']
+)
+
+# %%
+# Plot learning curve
+import lightgbm as lgb
+
+evals_result = constrained_lgbm_cv.evals_result_
+train_metric = list(evals_result['train'].values())[0]
+test_metric = list(evals_result['test'].values())[0]
+
+plt.figure(figsize=(10, 6))
+plt.plot(train_metric, label='train')
+plt.plot(test_metric, label='test')
+plt.xlabel('Iterations')
+plt.ylabel('Loss')
+plt.title('Learning Curve - Constrained LGBM')
+plt.legend()
+plt.show()
+
+# %%
+# The learning curve shows clear signs of overfitting. Training loss keeps going down
+# but test loss starts increasing after about 10-20 iterations. The growing gap between
+# the two curves suggests we should use early stopping or reduce the number of iterations.
+
+# %%
+# Exercise 4: Evaluation Plots (PDP)
+
+import dalex as dx
+from sklearn.inspection import PartialDependenceDisplay
+
+# Create explainer for constrained LGBM
+explainer_lgbm = dx.Explainer(
+    constrained_lgbm_cv, 
+    X_test_t, 
+    y_test_t,
+    label="Constrained LGBM"
+)
+
+# %%
+# Plot PDPs for numerical features using sklearn
+numerical_features = ['BonusMalus', 'Density']
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+for i, feature in enumerate(numerical_features):
+    feature_idx = list(X_train_t.columns).index(feature)
+    PartialDependenceDisplay.from_estimator(
+        constrained_lgbm_cv, 
+        X_test_t, 
+        [feature_idx],
+        ax=axes[i]
+    )
+    axes[i].set_title(f'PDP: {feature}')
+
+plt.tight_layout()
+plt.show()
+
+# %%
+# From the PDPs we can see that BonusMalus has a clear monotonic increasing effect
+# on predictions - this makes sense since higher BonusMalus means worse claim history.
+# Density has a steep effect at low values but flattens out at higher densities.
